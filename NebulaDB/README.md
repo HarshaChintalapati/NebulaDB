@@ -1,6 +1,6 @@
 # NebulaDB
 
-NebulaDB is an educational distributed SQL database MVP in Java 21.
+NebulaDB is an distributed SQL database MVP in Java 21.
 
 Implemented in this repository:
 - restricted SQL: CREATE TABLE, INSERT, SELECT, UPDATE, DELETE
@@ -18,11 +18,6 @@ Client -> SQL Parser -> Query Coordinator -> Shard Router
                                                        |
                                             WAL -> MemTable -> SSTables -> Compaction
 ```
-
-## Scope
-
-This is intentionally an interview/learning implementation, not production infrastructure. It does not yet include multi-process gRPC transport, Raft snapshots, membership changes, MVCC, or multi-shard transactions. `docs/ROADMAP.md` explains how to extend it.
-
 ## Build
 
 ```bash
