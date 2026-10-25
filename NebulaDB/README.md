@@ -5,7 +5,7 @@ NebulaDB is an distributed SQL database MVP in Java 21.
 Implemented in this repository:
 - restricted SQL: CREATE TABLE, INSERT, SELECT, UPDATE, DELETE
 - hash-based sharding
-- educational Raft core: follower/candidate/leader, RequestVote, AppendEntries, quorum commit
+- Raft core: follower/candidate/leader, RequestVote, AppendEntries, quorum commit
 - LSM-style local storage: WAL, sorted MemTable, SSTables, Bloom filters, compaction
 - crash recovery from WAL
 - tests and Dockerfile
