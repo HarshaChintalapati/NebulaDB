@@ -1,0 +1,41 @@
+# 5-node NebulaDB cluster: 10 shards, replication factor 3.
+#   docker compose up --build
+#   docker compose run --rm shell
+# Kill a node to watch failover:  docker compose kill n1   (then: docker compose start n1)
+x-cluster: &cluster "n1=n1:7000,n2=n2:7000,n3=n3:7000,n4=n4:7000,n5=n5:7000"
+
+services:
+  n1: &node
+    build: .
+    command: ["server", "--id", "n1", "--cluster", *cluster, "--shards", "10", "--rf", "3", "--data", "/data"]
+    volumes: ["n1-data:/data"]
+  n2:
+    <<: *node
+    command: ["server", "--id", "n2", "--cluster", *cluster, "--shards", "10", "--rf", "3", "--data", "/data"]
+    volumes: ["n2-data:/data"]
+  n3:
+    <<: *node
+    command: ["server", "--id", "n3", "--cluster", *cluster, "--shards", "10", "--rf", "3", "--data", "/data"]
+    volumes: ["n3-data:/data"]
+  n4:
+    <<: *node
+    command: ["server", "--id", "n4", "--cluster", *cluster, "--shards", "10", "--rf", "3", "--data", "/data"]
+    volumes: ["n4-data:/data"]
+  n5:
+    <<: *node
+    command: ["server", "--id", "n5", "--cluster", *cluster, "--shards", "10", "--rf", "3", "--data", "/data"]
+    volumes: ["n5-data:/data"]
+  shell:
+    build: .
+    profiles: ["tools"]
+    stdin_open: true
+    tty: true
+    command: ["shell", "--cluster", *cluster, "--shards", "10", "--rf", "3"]
+    depends_on: [n1, n2, n3, n4, n5]
+
+volumes:
+  n1-data:
+  n2-data:
+  n3-data:
+  n4-data:
+  n5-data:
