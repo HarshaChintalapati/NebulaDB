@@ -6,5 +6,5 @@ RUN mvn -q -DskipTests package
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
-COPY --from=build /app/target/nebuladb-0.2.0.jar /app/nebuladb.jar
+COPY --from=build /app/target/nebuladb-0.3.0.jar /app/nebuladb.jar
 ENTRYPOINT ["java", "-jar", "/app/nebuladb.jar"]

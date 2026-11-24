@@ -1,11 +1,11 @@
 # NebulaDB
 
-A sharded, Raft-replicated key-value database with a small SQL layer, written in Java 21 with **no runtime dependencies**: the storage engine, the Raft implementation, the RPC layer and the wire format are all plain JDK.
+A sharded, Raft-replicated key-value database with a small SQL layer, written in Java 21. The storage engine and the Raft implementation are written from scratch on the plain JDK. Nodes talk over **gRPC** (Protocol Buffers over HTTP/2) by default, with a dependency-free HTTP/1.1 transport as an alternative.
 
 - **Storage:** LSM-tree engine per replica, with a write-ahead log, sorted memtable, SSTables (Bloom filter and sparse index), compaction, and crash recovery from the WAL
 - **Replication:** Raft per shard: leader election, log replication, majority commit, durable term, vote and log, conflict truncation, and leader no-op on election
 - **Sharding:** hash partitioning; each shard is its own Raft group of `rf` replicas spread across nodes
-- **RPC:** binary messages over HTTP/1.1 (`java.net.http` + `com.sun.net.httpserver`) behind a `RaftTransport` interface
+- **RPC:** gRPC service defined in [`src/main/proto/nebula.proto`](src/main/proto/nebula.proto) (`RequestVote`, `AppendEntries`, `Kv`), behind a `RaftTransport` interface. A JDK-only HTTP/1.1 transport implements the same interface (`--transport http`)
 - **Client:** routes keys to shards, finds leaders, follows `NOT_LEADER` hints, and retries through elections
 - **Fault testing:** a chaos runner crashes shard leaders under concurrent writes and verifies that no acknowledged write is lost and that replicas converge
 
@@ -46,7 +46,9 @@ Reads also go through the log, so they are linearizable (simple, but it costs a 
 - **Torn writes:** every Raft log and WAL record carries a length and a CRC32. On restart, a half-written tail is detected and cut off.
 - **State machine recovery:** the applied index is stored in the LSM engine itself. The engine's own WAL is not fsynced per write, because the Raft log is the source of truth. A crash can only lose a suffix of the WAL (data and applied markers together), and those entries are simply re-applied. PUT and DELETE are idempotent.
 - **Storage fixes made along the way:** SSTables are fsynced before the WAL is truncated; SSTable files are numbered so restart order equals age order; compaction keeps tombstones, so a crash mid-compaction cannot resurrect deleted keys.
-- **RPC latency:** the HTTP server sets `TCP_NODELAY`. Without it, every small RPC hit the ~40 ms delayed-ACK stall, which made writes about 10x slower.
+- **RPC latency (HTTP transport):** the HTTP server sets `TCP_NODELAY`. Without it, every small RPC hit the ~40 ms delayed-ACK stall, which made writes about 10x slower.
+- **gRPC reconnects:** after a peer crashes, gRPC backs off reconnect attempts exponentially (up to minutes). Raft already retries on every heartbeat, so the transport resets that backoff, and a restarted node becomes reachable again right away.
+- **Blocking handlers:** a client write blocks until Raft commits, so gRPC handlers run on a dedicated thread pool, not on gRPC's network threads.
 
 ## Build and test
 
@@ -54,21 +56,23 @@ Reads also go through the log, so they are linearizable (simple, but it costs a 
 mvn clean test package
 ```
 
-Tests cover the LSM engine (WAL recovery, compaction order, tombstones), the Raft log (truncation, torn tails), Raft itself over an in-memory network (single leader, replication, leader crash and restart, an isolated leader that cannot commit and whose entry is discarded), the cluster over real HTTP, and a short chaos run.
+Tests cover the LSM engine (WAL recovery, compaction order, tombstones), the Raft log (truncation, torn tails), Raft itself over an in-memory network (single leader, replication, leader crash and restart, an isolated leader that cannot commit and whose entry is discarded), and the cluster and a short chaos run over **both** gRPC and HTTP.
+
+The build generates the gRPC stubs from `nebula.proto` (protobuf-maven-plugin) and produces one runnable jar.
 
 ## Run the failure test
 
 ```bash
-java -jar target/nebuladb-0.2.0.jar chaos --failures 100
-# defaults: --nodes 5 --shards 10 --rf 3 --writers 8
+java -jar target/nebuladb-0.3.0.jar chaos --failures 100
+# defaults: --nodes 5 --shards 10 --rf 3 --writers 8 --transport grpc
 ```
 
-This starts a 5-node cluster in one JVM, with each node on its own port and data directory and nodes talking over HTTP. Eight writers insert unique keys continuously. Each round crashes the current leader of a shard (no flush), measures the time until a new leader is elected, keeps writing while the node is down, and then restarts the node from disk. At the end it checks that every acknowledged write reads back with its exact value, and that every replica of every shard holds the same data. It prints a summary ending in `RESULT: PASS` or `FAIL`.
+This starts a 5-node cluster in one JVM, with each node on its own port and data directory and nodes talking over gRPC. Eight writers insert unique keys continuously. Each round crashes the current leader of a shard (no flush), measures the time until a new leader is elected, keeps writing while the node is down, and then restarts the node from disk. At the end it checks that every acknowledged write reads back with its exact value, and that every replica of every shard holds the same data. It prints a summary ending in `RESULT: PASS` or `FAIL`.
 
 ## Benchmark
 
 ```bash
-java -jar target/nebuladb-0.2.0.jar bench --rows 1000000 --threads 32
+java -jar target/nebuladb-0.3.0.jar bench --rows 1000000 --threads 32
 # or against a running cluster: --cluster n1=host:7001,...
 ```
 
@@ -80,8 +84,8 @@ Fill this in from your own runs, on your own machine.
 
 | Run | Setup | Result |
 |---|---|---|
-| Chaos | 5 nodes, 10 shards, rf=3, 100 leader failures | _acked writes / lost writes / failover p50, p95_ |
-| Bench | 5 nodes, 10 shards, rf=3, N rows, 32 threads | _writes/s, p50/p95/p99_ |
+| Chaos | gRPC, 5 nodes, 10 shards, rf=3, 100 leader failures | _acked writes / lost writes / failover p50, p95_ |
+| Bench | gRPC, 5 nodes, 10 shards, rf=3, N rows, 32 threads | _writes/s, p50/p95/p99_ |
 
 ## Run a real cluster
 
@@ -94,9 +98,9 @@ docker compose kill n1                 # watch shards fail over; then: docker co
 Or by hand:
 
 ```bash
-java -jar target/nebuladb-0.2.0.jar server --id n1 --cluster n1=localhost:7001,n2=localhost:7002,n3=localhost:7003 --shards 4 --rf 3
+java -jar target/nebuladb-0.3.0.jar server --id n1 --cluster n1=localhost:7001,n2=localhost:7002,n3=localhost:7003 --shards 4 --rf 3
 # ...same for n2 and n3, then:
-java -jar target/nebuladb-0.2.0.jar shell --cluster n1=localhost:7001,n2=localhost:7002,n3=localhost:7003 --shards 4 --rf 3
+java -jar target/nebuladb-0.3.0.jar shell --cluster n1=localhost:7001,n2=localhost:7002,n3=localhost:7003 --shards 4 --rf 3
 ```
 
 ```sql
@@ -107,7 +111,7 @@ UPDATE users SET name = 'Sai' WHERE id = 42;
 DELETE FROM users WHERE id = 42;
 ```
 
-Single process, without replication: `java -jar target/nebuladb-0.2.0.jar local`
+Single process, without replication: `java -jar target/nebuladb-0.3.0.jar local`
 
 ## Code map
 
@@ -115,7 +119,10 @@ Single process, without replication: `java -jar target/nebuladb-0.2.0.jar local`
 storage/   LsmStorageEngine, WriteAheadLog, SSTable, BloomFilter
 raft/      RaftNode (election, replication, commit, apply), RaftLog, RaftMeta, Messages, RaftTransport
 kv/        Command encoding, KvStateMachine (Raft -> LSM), LocalShardedStore
-net/       Codec (binary wire format), HttpTransport (client side), RpcServer (server side)
+net/       Transports (pick gRPC or HTTP), NodeTransport / RpcEndpoint interfaces
+net/grpc/  GrpcTransport (channels, deadlines), GrpcRpcServer, ProtoMapper (records <-> protobuf)
+net/       HttpTransport + RpcServer + Codec (JDK-only alternative)
+proto/     nebula.proto (service and message definitions)
 cluster/   ClusterConfig (placement), NebulaNode (one server), NebulaClient (routing and retries), LocalCluster
 sql/ query/ minimal SQL parser; rows stored as table:pk, catalog as __catalog:table
 chaos/     LeaderFailoverChaos
@@ -130,4 +137,4 @@ bench/     LoadBench
 - **Reads go through the log:** ReadIndex or leader leases would make them cheaper.
 - **One fsync per proposal:** batching proposals (group commit) would raise throughput a lot.
 - **Single-key operations only:** no transactions, no MVCC, no range scans or secondary indexes, and the SQL is a tiny subset.
-- **HTTP/1.1 with a hand-written codec:** a gRPC and Protocol Buffers transport would implement the same `RaftTransport` interface.
+- **Unary RPCs only:** a streaming `AppendEntries` would cut per-batch overhead for followers that are far behind.
