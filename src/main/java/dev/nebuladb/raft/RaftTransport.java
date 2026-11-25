@@ -3,9 +3,9 @@ package dev.nebuladb.raft;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * How a Raft node talks to its peers. Production uses HttpTransport (JDK HTTP);
+ * How a Raft node talks to its peers. Production uses GrpcTransport (or HttpTransport);
  * the unit tests use an in-memory transport that can drop messages to simulate
- * partitions. A gRPC transport would implement this same interface.
+ * partitions. Raft itself never knows which one it is talking through.
  *
  * Futures complete exceptionally on network errors or timeouts.
  */

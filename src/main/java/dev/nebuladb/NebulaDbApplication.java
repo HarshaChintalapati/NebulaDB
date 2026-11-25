@@ -7,6 +7,7 @@ import dev.nebuladb.cluster.NebulaClient;
 import dev.nebuladb.cluster.NebulaNode;
 import dev.nebuladb.kv.KvStore;
 import dev.nebuladb.kv.LocalShardedStore;
+import dev.nebuladb.net.Transports;
 import dev.nebuladb.query.QueryCoordinator;
 import dev.nebuladb.raft.RaftTiming;
 import dev.nebuladb.sql.SimpleSqlParser;
@@ -21,6 +22,8 @@ import java.util.concurrent.CountDownLatch;
 /**
  * Entry point.
  *
+ * Every cluster mode accepts --transport grpc (default) or --transport http.
+ *
  *   server --id n1 --cluster n1=host:7001,n2=host:7002,... [--shards 10 --rf 3 --data ./data]
  *   shell  --cluster n1=host:7001,...  [--shards 10 --rf 3]      SQL shell against a cluster
  *   local  [--data ./data --shards 3]                            single process, no replication
@@ -33,20 +36,21 @@ public final class NebulaDbApplication {
         Map<String, String> args = parse(argv);
         int shards = Integer.parseInt(args.getOrDefault("shards", "local".equals(mode) ? "3" : "10"));
         int rf = Integer.parseInt(args.getOrDefault("rf", "3"));
+        Transports.Kind transport = Transports.Kind.parse(args.get("transport"));
         switch (mode) {
             case "server" -> {
                 ClusterConfig config = ClusterConfig.parse(require(args, "cluster"), shards, rf);
                 String id = require(args, "id");
                 NebulaNode node = new NebulaNode(id, config, Path.of(args.getOrDefault("data", "data")).resolve(id),
-                        RaftTiming.defaults(), true);
+                        RaftTiming.defaults(), true, transport);
                 node.start();
-                System.out.printf("NebulaDB node %s up on %s, replicas of shards %s%n",
-                        id, config.nodes().get(id), config.shardsOn(id));
+                System.out.printf("NebulaDB node %s up on %s (%s), replicas of shards %s%n",
+                        id, config.nodes().get(id), transport, config.shardsOn(id));
                 Runtime.getRuntime().addShutdownHook(new Thread(node::close));
                 new CountDownLatch(1).await();
             }
             case "shell" -> {
-                try (NebulaClient client = new NebulaClient(ClusterConfig.parse(require(args, "cluster"), shards, rf))) {
+                try (NebulaClient client = new NebulaClient(ClusterConfig.parse(require(args, "cluster"), shards, rf), transport)) {
                     repl(client, "NebulaDB cluster shell. Type SQL or 'exit'.");
                 }
             }

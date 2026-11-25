@@ -3,6 +3,7 @@ package dev.nebuladb.bench;
 import dev.nebuladb.cluster.ClusterConfig;
 import dev.nebuladb.cluster.LocalCluster;
 import dev.nebuladb.cluster.NebulaClient;
+import dev.nebuladb.net.Transports;
 import dev.nebuladb.raft.RaftTiming;
 
 import java.nio.file.Files;
@@ -26,6 +27,7 @@ public final class LoadBench {
         int threads = Integer.parseInt(args.getOrDefault("threads", "32"));
         int shards = Integer.parseInt(args.getOrDefault("shards", "10"));
         int rf = Integer.parseInt(args.getOrDefault("rf", "3"));
+        Transports.Kind transport = Transports.Kind.parse(args.get("transport"));
         LocalCluster local = null;
         ClusterConfig config;
         if (args.containsKey("cluster")) {
@@ -33,14 +35,14 @@ public final class LoadBench {
         } else {
             int nodes = Integer.parseInt(args.getOrDefault("nodes", "5"));
             Path dir = args.containsKey("dir") ? Path.of(args.get("dir")) : Files.createTempDirectory("nebula-bench");
-            local = new LocalCluster(nodes, shards, rf, dir, RaftTiming.defaults(), !"false".equals(args.get("fsync")));
+            local = new LocalCluster(nodes, shards, rf, dir, RaftTiming.defaults(), !"false".equals(args.get("fsync")), transport);
             local.startAll();
             for (int s = 0; s < shards; s++) local.awaitLeader(s, null, 10_000).orElseThrow();
             config = local.config();
         }
-        System.out.printf("Benchmark: %d rows, %d client threads, %d nodes, %d shards, rf=%d%n",
-                rows, threads, config.nodes().size(), shards, rf);
-        try (NebulaClient client = new NebulaClient(config)) {
+        System.out.printf("Benchmark: %d rows, %d client threads, %d nodes, %d shards, rf=%d, transport=%s%n",
+                rows, threads, config.nodes().size(), shards, rf, transport);
+        try (NebulaClient client = new NebulaClient(config, transport)) {
             long[] latNanos = new long[rows];
             int[] perShard = new int[shards];
             AtomicLong next = new AtomicLong();

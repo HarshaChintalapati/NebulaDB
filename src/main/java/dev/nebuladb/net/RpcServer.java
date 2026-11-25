@@ -13,8 +13,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
-/** Server side of HttpTransport: decodes requests and hands them to the node. */
-public final class RpcServer {
+/** Server side of HttpTransport (JDK HTTP/1.1): decodes requests and hands them to the node. */
+public final class RpcServer implements RpcEndpoint {
     static {
         // Disable Nagle's algorithm on accepted sockets. Without this, small
         // request/response pairs hit the ~40 ms delayed-ACK stall on every RPC.
@@ -71,6 +71,7 @@ public final class RpcServer {
         }
     }
 
+    @Override
     public void start() {
         server.start();
     }
@@ -79,6 +80,7 @@ public final class RpcServer {
         return server.getAddress().getPort();
     }
 
+    @Override
     public void stop() {
         server.stop(0);
         executor.shutdownNow();

@@ -1,5 +1,6 @@
 package dev.nebuladb.cluster;
 
+import dev.nebuladb.net.Transports;
 import dev.nebuladb.raft.RaftNode;
 import dev.nebuladb.raft.RaftTiming;
 
@@ -10,7 +11,8 @@ import java.util.*;
 
 /**
  * Runs a whole cluster inside one JVM, each node on its own localhost port with
- * its own data directory. Nodes still talk to each other over real HTTP. Used by
+ * its own data directory. Nodes still talk to each other over the real network
+ * (gRPC or HTTP). Used by
  * the tests, the chaos runner and the local benchmark.
  */
 public final class LocalCluster implements AutoCloseable {
@@ -18,15 +20,18 @@ public final class LocalCluster implements AutoCloseable {
     private final Path baseDir;
     private final RaftTiming timing;
     private final boolean fsync;
+    private final Transports.Kind transportKind;
     private final Map<String, NebulaNode> running = new LinkedHashMap<>();
 
-    public LocalCluster(int nodeCount, int shards, int rf, Path baseDir, RaftTiming timing, boolean fsync) throws IOException {
+    public LocalCluster(int nodeCount, int shards, int rf, Path baseDir, RaftTiming timing, boolean fsync,
+                        Transports.Kind transportKind) throws IOException {
         LinkedHashMap<String, String> nodes = new LinkedHashMap<>();
         for (int i = 1; i <= nodeCount; i++) nodes.put("n" + i, "127.0.0.1:" + freePort());
         this.config = new ClusterConfig(nodes, shards, rf);
         this.baseDir = baseDir;
         this.timing = timing;
         this.fsync = fsync;
+        this.transportKind = transportKind;
     }
 
     private static int freePort() throws IOException {
@@ -34,6 +39,10 @@ public final class LocalCluster implements AutoCloseable {
             s.setReuseAddress(true);
             return s.getLocalPort();
         }
+    }
+
+    public Transports.Kind transportKind() {
+        return transportKind;
     }
 
     public ClusterConfig config() {
@@ -46,7 +55,7 @@ public final class LocalCluster implements AutoCloseable {
 
     public synchronized void start(String id) throws IOException {
         if (running.containsKey(id)) return;
-        NebulaNode node = new NebulaNode(id, config, baseDir.resolve(id), timing, fsync);
+        NebulaNode node = new NebulaNode(id, config, baseDir.resolve(id), timing, fsync, transportKind);
         node.start();
         running.put(id, node);
     }

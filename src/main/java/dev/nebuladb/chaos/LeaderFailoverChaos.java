@@ -4,6 +4,7 @@ import dev.nebuladb.cluster.ClusterConfig;
 import dev.nebuladb.cluster.LocalCluster;
 import dev.nebuladb.cluster.NebulaClient;
 import dev.nebuladb.kv.KvStateMachine;
+import dev.nebuladb.net.Transports;
 import dev.nebuladb.raft.RaftTiming;
 import dev.nebuladb.sharding.ShardRouter;
 
@@ -60,9 +61,10 @@ public final class LeaderFailoverChaos {
     }
 
     public static Report run(Path dir, int nodes, int shards, int rf, int failures, int writers,
-                             RaftTiming timing, boolean fsync, PrintStream log) throws Exception {
+                             RaftTiming timing, boolean fsync, Transports.Kind transport,
+                             PrintStream log) throws Exception {
         long started = System.currentTimeMillis();
-        try (LocalCluster cluster = new LocalCluster(nodes, shards, rf, dir, timing, fsync)) {
+        try (LocalCluster cluster = new LocalCluster(nodes, shards, rf, dir, timing, fsync, transport)) {
             cluster.startAll();
             for (int s = 0; s < shards; s++) {
                 if (cluster.awaitLeader(s, null, 10_000).isEmpty()) throw new IllegalStateException("no initial leader for shard " + s);
@@ -72,7 +74,7 @@ public final class LeaderFailoverChaos {
             AtomicLong failed = new AtomicLong();
             AtomicBoolean stop = new AtomicBoolean();
             List<Thread> threads = new ArrayList<>();
-            try (NebulaClient client = new NebulaClient(config)) {
+            try (NebulaClient client = new NebulaClient(config, transport)) {
                 for (int t = 0; t < writers; t++) {
                     final int w = t;
                     Thread th = new Thread(() -> {
@@ -181,10 +183,11 @@ public final class LeaderFailoverChaos {
         int rf = Integer.parseInt(args.getOrDefault("rf", "3"));
         int writers = Integer.parseInt(args.getOrDefault("writers", "8"));
         boolean fsync = !"false".equals(args.get("fsync"));
+        Transports.Kind transport = Transports.Kind.parse(args.get("transport"));
         Path dir = args.containsKey("dir") ? Path.of(args.get("dir")) : Files.createTempDirectory("nebula-chaos");
-        System.out.printf("Chaos: %d nodes, %d shards, rf=%d, %d writers, %d leader failures, fsync=%s, data in %s%n",
-                nodes, shards, rf, writers, failures, fsync, dir);
-        Report r = run(dir, nodes, shards, rf, failures, writers, RaftTiming.defaults(), fsync, System.out);
+        System.out.printf("Chaos: %d nodes, %d shards, rf=%d, %d writers, %d leader failures, transport=%s, fsync=%s, data in %s%n",
+                nodes, shards, rf, writers, failures, transport, fsync, dir);
+        Report r = run(dir, nodes, shards, rf, failures, writers, RaftTiming.defaults(), fsync, transport, System.out);
         System.out.println(r.summary());
         return r.passed() ? 0 : 1;
     }

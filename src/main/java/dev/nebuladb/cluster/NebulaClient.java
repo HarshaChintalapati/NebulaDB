@@ -3,7 +3,8 @@ package dev.nebuladb.cluster;
 import dev.nebuladb.kv.Command;
 import dev.nebuladb.kv.KvStore;
 import dev.nebuladb.net.Codec;
-import dev.nebuladb.net.HttpTransport;
+import dev.nebuladb.net.NodeTransport;
+import dev.nebuladb.net.Transports;
 import dev.nebuladb.sharding.ShardRouter;
 
 import java.io.IOException;
@@ -26,18 +27,18 @@ import java.util.concurrent.TimeUnit;
 public final class NebulaClient implements KvStore, AutoCloseable {
     private final ClusterConfig config;
     private final ShardRouter router;
-    private final HttpTransport transport;
+    private final NodeTransport transport;
     private final Map<Integer, String> leaderCache = new ConcurrentHashMap<>();
     private final long deadlineMs;
 
-    public NebulaClient(ClusterConfig config) {
-        this(config, 15_000);
+    public NebulaClient(ClusterConfig config, Transports.Kind transportKind) {
+        this(config, transportKind, 15_000);
     }
 
-    public NebulaClient(ClusterConfig config, long deadlineMs) {
+    public NebulaClient(ClusterConfig config, Transports.Kind transportKind, long deadlineMs) {
         this.config = config;
         this.router = new ShardRouter(config.shards());
-        this.transport = new HttpTransport(config.nodes(), Duration.ofSeconds(6));
+        this.transport = Transports.client(transportKind, config.nodes(), Duration.ofSeconds(6));
         this.deadlineMs = deadlineMs;
     }
 

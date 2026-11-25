@@ -2,8 +2,10 @@ package dev.nebuladb.cluster;
 
 import dev.nebuladb.kv.KvStateMachine;
 import dev.nebuladb.net.Codec;
-import dev.nebuladb.net.HttpTransport;
+import dev.nebuladb.net.NodeTransport;
+import dev.nebuladb.net.RpcEndpoint;
 import dev.nebuladb.net.RpcServer;
+import dev.nebuladb.net.Transports;
 import dev.nebuladb.raft.*;
 
 import java.io.Closeable;
@@ -15,7 +17,8 @@ import java.util.concurrent.*;
 
 /**
  * One database server. It hosts one Raft replica for every shard placed on it
- * (see ClusterConfig) and serves Raft RPCs and client requests over HTTP.
+ * (see ClusterConfig) and serves Raft RPCs and client requests over gRPC (or
+ * plain HTTP; see Transports).
  *
  * Client requests for shard s are proposed to this node's Raft replica of s. If it
  * is not the leader, the client gets NOT_LEADER plus a hint and retries there.
@@ -26,22 +29,25 @@ public final class NebulaNode implements Closeable, RpcServer.Handler {
     private final Path dataDir;
     private final RaftTiming timing;
     private final boolean fsync;
+    private final Transports.Kind transportKind;
     private final Map<Integer, RaftNode> groups = new ConcurrentHashMap<>();
     private final Map<Integer, KvStateMachine> stateMachines = new ConcurrentHashMap<>();
-    private HttpTransport transport;
-    private RpcServer server;
+    private NodeTransport transport;
+    private RpcEndpoint server;
 
-    public NebulaNode(String id, ClusterConfig config, Path dataDir, RaftTiming timing, boolean fsync) {
+    public NebulaNode(String id, ClusterConfig config, Path dataDir, RaftTiming timing, boolean fsync,
+                      Transports.Kind transportKind) {
         if (!config.nodes().containsKey(id)) throw new IllegalArgumentException("node " + id + " not in config");
         this.id = id;
         this.config = config;
         this.dataDir = dataDir;
         this.timing = timing;
         this.fsync = fsync;
+        this.transportKind = transportKind;
     }
 
     public synchronized void start() throws IOException {
-        transport = new HttpTransport(config.nodes(), Duration.ofMillis(Math.max(200, timing.electionMinMs())));
+        transport = Transports.client(transportKind, config.nodes(), Duration.ofMillis(Math.max(200, timing.electionMinMs())));
         for (int shard : config.shardsOn(id)) {
             Path dir = dataDir.resolve("shard-" + shard);
             KvStateMachine sm = new KvStateMachine(dir.resolve("state"));
@@ -53,7 +59,7 @@ public final class NebulaNode implements Closeable, RpcServer.Handler {
         }
         String addr = config.nodes().get(id);
         int port = Integer.parseInt(addr.substring(addr.lastIndexOf(':') + 1));
-        server = new RpcServer("0.0.0.0", port, this);
+        server = Transports.server(transportKind, "0.0.0.0", port, this);
         groups.values().forEach(RaftNode::start);
         server.start();
     }

@@ -1,7 +1,6 @@
 package dev.nebuladb.net;
 
 import dev.nebuladb.raft.Messages;
-import dev.nebuladb.raft.RaftTransport;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -19,7 +18,7 @@ import java.util.function.Function;
  * Bodies are binary (see Codec). Every call has a timeout so a dead peer turns
  * into a failed future instead of a hung request.
  */
-public final class HttpTransport implements RaftTransport, AutoCloseable {
+public final class HttpTransport implements NodeTransport {
     private final Map<String, String> addresses; // node id -> host:port
     private final HttpClient http;
     private final ExecutorService executor;
@@ -50,6 +49,7 @@ public final class HttpTransport implements RaftTransport, AutoCloseable {
         return post(target, "/raft/append", Codec.encode(request), Codec::decodeAppendResponse);
     }
 
+    @Override
     public CompletableFuture<Codec.KvResponse> kv(String target, Codec.KvRequest request) {
         return post(target, "/kv", Codec.encode(request), Codec::decodeKvResponse);
     }
